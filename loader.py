@@ -65,4 +65,4 @@ if __name__ == "__main__":
     if result:
         print(f"Ready to process: {os.path.basename(result)}")
     else:
-        print("\n Program terminated. Is your path correct? \n")
+        print("\n Program terminated. Your path may be incorrect? \n")
