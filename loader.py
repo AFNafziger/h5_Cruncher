@@ -2,6 +2,7 @@ import os
 import stat
 
 def select_h5_file():
+    #/projectnb/davey-lab/EBOV_Optical_Pooled_Screen/Metadata/Genomewide/Genomewide_Metadata.h5
     print("Enter the path to your H5 file:")
     file_path = input("File path: ").strip().strip('"').strip("'")
     
@@ -21,7 +22,7 @@ def protect_file_readonly(file_path):
         current_permissions = os.stat(file_path).st_mode
         readonly_permissions = current_permissions & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
         os.chmod(file_path, readonly_permissions)
-        print(f"File '{os.path.basename(file_path)}' is now read-only protected")
+        #print(f"File '{os.path.basename(file_path)}' is now read-only protected")
         return True
     except Exception as e:
         print(f"Error protecting file: {e}")
@@ -39,17 +40,21 @@ def main():#MAIN FUNCTION
  By Atticus Nafziger                                                             
  July 2025                                                           
 """)
-    print("-" * 20)
+    print("-" * 40)
     
     file_path = select_h5_file()
     
     if not file_path:
         return
     
-    print(f"Selected H5 file: {os.path.basename(file_path)}")
+    #print(f"Selected H5 file: {os.path.basename(file_path)}")
+    size_bytes = os.path.getsize(file_path)
+    size_mb = size_bytes / (1024 * 1024 * 1024)
+    print(f"File size: {size_bytes:,} bytes ({size_mb:.2f} GB)\n")
+    
     
     if protect_file_readonly(file_path):
-        print("File is protected and ready for processing")
+        #print("File is protected and ready for processing")
         return file_path
     else:
         print("Failed to protect file")
