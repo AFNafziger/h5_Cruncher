@@ -1,9 +1,11 @@
 import os
 import stat
+import h5py
 from loader import main as load_h5_file
 
 def display_file_stat(file_path):
     """Display basic file statistics using os.stat."""
+    import time
     try:
         st = os.stat(file_path)
         size_bytes = st.st_size
@@ -16,25 +18,40 @@ def display_file_stat(file_path):
         print(f"Permissions: {mode}")
         print(f"Owner UID: {st.st_uid}")
         print(f"Group GID: {st.st_gid}")
-        #print(f"Last modified: {time.ctime(st.st_mtime)}")
-        #print(f"Last accessed: {time.ctime(st.st_atime)}")
-        #print(f"Created: {time.ctime(st.st_ctime)}")
+        print(f"Last modified: {time.ctime(st.st_mtime)}")
         print(f"{'='*50}")
     except Exception as e:
         print(f"Error reading file stats: {e}")
 
+def print_h5_structure(name, obj):
+    """Helper function to print the structure of the HDF5 file."""
+    if isinstance(obj, h5py.Group):
+        print(f"[Group] {name}")
+    elif isinstance(obj, h5py.Dataset):
+        print(f"  [Dataset] {name} shape={obj.shape} dtype={obj.dtype}")
+
+def display_h5_structure(file_path):
+    """Display the internal structure of the HDF5 file."""
+    print("\nHDF5 File Structure:")
+    print("-" * 40)
+    try:
+        with h5py.File(file_path, 'r') as h5file:
+            h5file.visititems(print_h5_structure)
+    except Exception as e:
+        print(f"Error reading HDF5 structure: {e}")
+
 def main():
-    """Main function to load and display file stats."""
-    print("File Stat Viewer")
+    """Main function to load and display file stats and structure."""
+    print("HDF5 File Stat & Structure Viewer")
     print("-" * 40)
     
     file_path = load_h5_file()
     
     if file_path:
         display_file_stat(file_path)
+        display_h5_structure(file_path)
     else:
-        print("No file loaded for stat analysis")
+        print("No file loaded for analysis")
 
 if __name__ == "__main__":
-    import time
     main()
