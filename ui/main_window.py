@@ -10,7 +10,8 @@ from core.h5_file_handler import H5FileHandler
 from ui.dataset_inspector import DatasetInspector
 from ui.dataset_list import DatasetList
 from ui.file_upload import FileUpload
-
+from ui.export_window import ExportWindow
+from core.dataframe_exporter import DataFrameExporter
 
 class MainWindow:
     def __init__(self, root: ttkb.Window):
@@ -133,6 +134,14 @@ class MainWindow:
 
         self._create_options_dialog_content(dialog, dataset_path)
 
+    def _export_dataset(self, dataset_path: str, dialog: ttkb.Toplevel) -> None:
+        dialog.destroy()
+        if not self.current_file:
+            Messagebox.show_error("No file loaded", title="Error")
+            return
+        # Instantiate and show the ExportWindow
+        ExportWindow(self.root, self.current_file, dataset_path)
+
     def _create_options_dialog_content(self, dialog: ttkb.Toplevel, dataset_path: str) -> None:
         main_frame = ttkb.Frame(dialog, padding=25)
         main_frame.pack(fill=BOTH, expand=True)
@@ -159,9 +168,9 @@ class MainWindow:
                     command=lambda: self._inspect_dataset(dataset_path, dialog)).pack(side=LEFT, padx=10)
 
         export_btn = ttkb.Button(button_frame, text="Export Dataset",
-                                 bootstyle="success", state=DISABLED)
+                             bootstyle="success",
+                             command=lambda: self._export_dataset(dataset_path, dialog))
         export_btn.pack(side=LEFT, padx=10)
-        self._create_tooltip(export_btn, "Export functionality coming soon!")
 
         instance_btn = ttkb.Button(button_frame, text="Specific Instance",
                                  bootstyle="success", state=DISABLED)
