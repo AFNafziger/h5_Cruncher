@@ -4,9 +4,8 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 from tkinter import filedialog, END, W, E, NSEW, BOTH, LEFT, RIGHT, Y
 import pandas as pd
-import threading
-import time
 from typing import List, Optional, Tuple, Any
+import math
 
 from core.h5_file_handler import H5FileHandler
 from core.dataframe_exporter import DataFrameExporter
@@ -20,18 +19,19 @@ class ExportWindow:
         self.file_handler = H5FileHandler()
         self.dataframe_exporter = DataFrameExporter()
 
-        # Initialize all attributes first to prevent AttributeError
         self.df_columns: List[str] = []
         self.selected_columns: List[str] = []
         self.row_selection_string: str = ""
-        self.column_selection_state: dict = {}  # {column_name: bool}
-        self.column_checkboxes: dict = {}  # To store Checkbutton widgets
-        self.column_vars: dict = {}  # To store BooleanVar for each checkbox
         
-        # Add loading state management
-        self.loading = False
-        self.columns_loaded = False
-        self.max_displayable_columns = 500  # Limit to prevent X11 memory issues
+        # Pagination variables
+        self.columns_per_page = 250
+        self.current_page = 0
+        self.total_pages = 0
+        self.filtered_columns: List[str] = []  # For search functionality
+        
+        # Column selection tracking (persists across pages)
+        self.column_vars = {}  # BooleanVar for each column (across all pages)
+        self.column_checkboxes = {}  # Only current page checkboxes
 
         self.dialog = ttkb.Toplevel(master)
         self.dialog.title(f"Export Dataset: {dataset_path.split('/')[-1]}")
@@ -41,7 +41,7 @@ class ExportWindow:
 
         self._center_dialog()
         self._setup_ui()
-        self._load_columns_safely()
+        self._load_columns()
 
     def _center_dialog(self) -> None:
         self.dialog.update_idletasks()
@@ -61,82 +61,71 @@ class ExportWindow:
         # Left Panel: Item Selector (Columns)
         left_frame = ttkb.Frame(main_frame, relief="solid", borderwidth=1, padding=10)
         left_frame.grid(row=0, column=0, sticky=NSEW, padx=(0, 10))
-        left_frame.grid_rowconfigure(3, weight=1)  # Make the scrollable area expandable
+        left_frame.grid_rowconfigure(2, weight=1)  # Make column list expandable
         left_frame.grid_columnconfigure(0, weight=1)
 
         ttkb.Label(left_frame, text="Select Columns:", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
 
-        # Warning for large datasets
-        self.warning_label = ttkb.Label(left_frame, text="", font=("Segoe UI", 9), bootstyle="warning")
-        self.warning_label.grid(row=1, column=0, sticky=W, pady=(0, 5))
-
         # Search frame
         search_frame = ttkb.Frame(left_frame)
-        search_frame.grid(row=2, column=0, sticky=(W, E), pady=(0, 10))
-        search_frame.grid_columnconfigure(0, weight=1)
+        search_frame.grid(row=1, column=0, sticky=EW, pady=(0, 10))
+        search_frame.grid_columnconfigure(1, weight=1)
 
         self.column_search_var = ttkb.StringVar()
-        # Don't trace immediately - wait until columns are loaded
-        self.search_entry = ttkb.Entry(search_frame, textvariable=self.column_search_var, bootstyle="info")
-        self.search_entry.grid(row=0, column=0, sticky=(W, E), padx=(0, 5))
-        self.search_entry.bind("<FocusIn>", self._on_search_focus_in)
-        self.search_entry.insert(0, "Search columns...")
-        self.search_entry.config(state="disabled")  # Initially disabled
+        search_entry = ttkb.Entry(search_frame, textvariable=self.column_search_var, bootstyle="info")
+        search_entry.grid(row=0, column=1, sticky=EW, padx=(0, 8))
+        
+        # Insert placeholder text first, then bind events
+        search_entry.insert(0, "Search columns...")
+        
+        # Bind events after inserting placeholder
+        self.column_search_var.trace_add("write", self._filter_columns)
+        search_entry.bind("<FocusIn>", lambda e: search_entry.delete(0, END) if search_entry.get() == "Search columns..." else None)
 
-        clear_search_btn = ttkb.Button(search_frame, text="✕", width=3, command=self._clear_search, state="disabled")
-        clear_search_btn.grid(row=0, column=1)
-        self.clear_search_btn = clear_search_btn
+        clear_search_btn = ttkb.Button(search_frame, text="✕", width=3, command=self._clear_search, bootstyle="secondary-outline")
+        clear_search_btn.grid(row=0, column=2)
 
-        # Scrollable column list frame
-        self.column_list_container = ttkb.Frame(left_frame)
-        self.column_list_container.grid(row=3, column=0, sticky=NSEW)
-        self.column_list_container.grid_rowconfigure(0, weight=1)
-        self.column_list_container.grid_columnconfigure(0, weight=1)
+        # Column list frame (scrollable)
+        self.column_list_frame = ttkb.Frame(left_frame)
+        self.column_list_frame.grid(row=2, column=0, sticky=NSEW)
+        self.column_list_frame.grid_columnconfigure(0, weight=1)
+        self.column_list_frame.grid_rowconfigure(0, weight=1)
 
-        # Create canvas and scrollbar for proper scrolling
-        self.canvas = ttkb.Canvas(self.column_list_container, highlightthickness=0)
-        self.scrollbar = ttkb.Scrollbar(self.column_list_container, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttkb.Frame(self.canvas)
+        # Pagination and action buttons frame
+        pagination_frame = ttkb.Frame(left_frame)
+        pagination_frame.grid(row=3, column=0, sticky=EW, pady=(10, 0))
+        pagination_frame.grid_columnconfigure(1, weight=1)
 
-        # Configure scrolling properly
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
+        # Pagination controls
+        nav_frame = ttkb.Frame(pagination_frame)
+        nav_frame.grid(row=0, column=0, sticky=W)
 
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.prev_btn = ttkb.Button(nav_frame, text="◀ Previous", command=self._previous_page, 
+                                   bootstyle="secondary-outline", state=DISABLED)
+        self.prev_btn.pack(side=LEFT, padx=(0, 5))
 
-        # Grid the canvas and scrollbar
-        self.canvas.grid(row=0, column=0, sticky=NSEW)
-        self.scrollbar.grid(row=0, column=1, sticky=(N, S))
+        self.page_label = ttkb.Label(nav_frame, text="Page 1 of 1", font=("Segoe UI", 9))
+        self.page_label.pack(side=LEFT, padx=10)
 
-        # Configure the scrollable frame to expand
-        self.scrollable_frame.grid_columnconfigure(0, weight=1)
+        self.next_btn = ttkb.Button(nav_frame, text="Next ▶", command=self._next_page, 
+                                   bootstyle="secondary-outline", state=DISABLED)
+        self.next_btn.pack(side=LEFT, padx=(5, 0))
 
-        # Bind mouse wheel to canvas
-        self._bind_mouse_wheel()
+        # Action buttons
+        action_frame = ttkb.Frame(pagination_frame)
+        action_frame.grid(row=1, column=0, columnspan=2, sticky=EW, pady=(10, 0))
 
-        # Loading indicator
-        self.loading_label = ttkb.Label(self.scrollable_frame, text="Loading columns...", 
-                                       font=("Segoe UI", 10), bootstyle="info")
-        self.loading_label.grid(row=0, column=0, pady=20)
+        select_all_button = ttkb.Button(action_frame, text="Select All (current page)", 
+                                       command=self._select_all_current_page, bootstyle="info-outline")
+        select_all_button.pack(side=LEFT, padx=(0, 5))
 
-        # Selection controls
-        selection_frame = ttkb.Frame(left_frame)
-        selection_frame.grid(row=4, column=0, sticky=(W, E), pady=(10, 0))
-        selection_frame.grid_columnconfigure(0, weight=1)
-        selection_frame.grid_columnconfigure(1, weight=1)
+        select_all_filtered_button = ttkb.Button(action_frame, text="Select All (filtered)", 
+                                               command=self._select_all_filtered_columns, bootstyle="info-outline")
+        select_all_filtered_button.pack(side=LEFT, padx=5)
 
-        self.select_all_button = ttkb.Button(selection_frame, text="Select All", 
-                                           command=self._select_all_filtered_columns, 
-                                           bootstyle="info-outline", state="disabled")
-        self.select_all_button.grid(row=0, column=0, sticky=EW, padx=(0, 5))
-
-        self.select_none_button = ttkb.Button(selection_frame, text="Select None", 
-                                            command=self._select_none, 
-                                            bootstyle="secondary-outline", state="disabled")
-        self.select_none_button.grid(row=0, column=1, sticky=EW, padx=(5, 0))
+        deselect_all_button = ttkb.Button(action_frame, text="Deselect All", 
+                                        command=self._deselect_all_columns, bootstyle="warning-outline")
+        deselect_all_button.pack(side=LEFT, padx=5)
 
         # Right Panel: Value Selector (Rows)
         right_frame = ttkb.Frame(main_frame, relief="solid", borderwidth=1, padding=10)
@@ -144,25 +133,16 @@ class ExportWindow:
         right_frame.grid_rowconfigure(1, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
 
-        ttkb.Label(right_frame, text="Select Rows (e.g., 1-10,12,200)", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
+        ttkb.Label(right_frame, text="Select Rows (e.g., 1-100,200,500-1000):", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
         self.row_selection_entry = ttkb.Entry(right_frame, bootstyle="info")
         self.row_selection_entry.grid(row=1, column=0, sticky=EW, pady=(0, 10))
         self.row_selection_entry.insert(0, "Leave blank for all rows")
-        self.row_selection_entry.configure(foreground="grey")
-        self.row_selection_entry.bind("<FocusIn>", self._on_row_focus_in)
+        self.row_selection_entry.bind("<FocusIn>", lambda e: self.row_selection_entry.delete(0, END) if self.row_selection_entry.get() == "Leave blank for all rows" else None)
 
-        ttkb.Label(right_frame, text="Excel's row limit is 1,048,576 rows.", font=("Segoe UI", 9), bootstyle="warning").grid(row=2, column=0, sticky=W, pady=(5, 0))
+        ttkb.Label(right_frame, text="Excel's row limit is approx. 1,048,576 rows.", font=("Segoe UI", 9), bootstyle="warning").grid(row=2, column=0, sticky=W, pady=(5, 0))
 
         export_max_rows_btn = ttkb.Button(right_frame, text="Export Max Excel Rows", command=self._export_max_excel_rows, bootstyle="info-outline")
         export_max_rows_btn.grid(row=3, column=0, sticky=EW, pady=(10, 0))
-
-        # Dataset info section
-        info_frame = ttkb.LabelFrame(right_frame, text="Dataset Info", padding=10)
-        info_frame.grid(row=4, column=0, sticky=(W, E), pady=(15, 0))
-        
-        self.dataset_info_label = ttkb.Label(info_frame, text="Loading dataset info...", 
-                                           font=("Segoe UI", 9), bootstyle="secondary")
-        self.dataset_info_label.pack(anchor=W)
 
         # Bottom Panel: Export and Info
         bottom_frame = ttkb.Frame(main_frame, padding=(0, 10))
@@ -174,316 +154,218 @@ class ExportWindow:
         self.preview_label = ttkb.Label(bottom_frame, text="Rows: 0 × Columns: 0", font=("Segoe UI", 10))
         self.preview_label.grid(row=0, column=0, sticky=W)
 
-        self.preview_button = ttkb.Button(bottom_frame, text="Preview", command=self._preview_export, 
-                                        bootstyle="secondary", state="disabled")
-        self.preview_button.grid(row=0, column=1, sticky=EW, padx=10)
-        
-        self.export_button = ttkb.Button(bottom_frame, text="Export CSV", command=self._export_csv, 
-                                       bootstyle="success", state="disabled")
-        self.export_button.grid(row=0, column=2, sticky=E)
+        ttkb.Button(bottom_frame, text="Preview", command=self._preview_export, bootstyle="secondary").grid(row=0, column=1, sticky=EW, padx=10)
+        ttkb.Button(bottom_frame, text="Export CSV", command=self._export_csv, bootstyle="success").grid(row=0, column=2, sticky=E)
 
-    def _on_search_focus_in(self, event):
-        if self.search_entry.get() == "Search columns...":
-            self.search_entry.delete(0, END)
-
-    def _on_row_focus_in(self, event):
-        if self.row_selection_entry.get() == "Leave blank for all rows":
-            self.row_selection_entry.delete(0, END)
-
-    def _bind_mouse_wheel(self) -> None:
-        """Bind mouse wheel scrolling to canvas"""
-        def on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
-        def on_mousewheel_linux(event):
-            self.canvas.yview_scroll(int(-1 * event.delta), "units")
-        
-        # Different binding for different platforms
-        self.canvas.bind("<MouseWheel>", on_mousewheel)  # Windows
-        self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))  # Linux
-        self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))   # Linux
-        
-        # Enable scrolling when mouse is over the canvas
-        def bind_to_mousewheel(event):
-            self.canvas.bind_all("<MouseWheel>", on_mousewheel)
-            self.canvas.bind_all("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))
-            self.canvas.bind_all("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
-        
-        def unbind_from_mousewheel(event):
-            self.canvas.unbind_all("<MouseWheel>")
-            self.canvas.unbind_all("<Button-4>")
-            self.canvas.unbind_all("<Button-5>")
-        
-        self.canvas.bind('<Enter>', bind_to_mousewheel)
-        self.canvas.bind('<Leave>', unbind_from_mousewheel)
-
-    def _clear_search(self) -> None:
-        """Clear the search field"""
-        if self.columns_loaded:
-            self.column_search_var.set("")
-
-    def _load_columns_safely(self) -> None:
-        """Load columns in a separate thread to prevent UI freezing"""
-        if self.loading:
-            return
-        
-        self.loading = True
-        
-        def load_columns_thread():
-            try:
-                # Load dataset info first (this is usually fast)
-                info = self.file_handler.get_dataset_info(self.h5_file_path, self.dataset_path)
-                
-                # Update dataset info in UI thread
-                self.dialog.after(0, lambda: self._update_dataset_info(info))
-                
-                # Get columns (this might be slow for large datasets)
-                if 'columns' in info and info['columns']:
-                    columns = info['columns']
-                else:
-                    # Fallback: try to get columns by reading a small sample
-                    try:
-                        sample_data = self.file_handler.read_dataset(
-                            self.h5_file_path, self.dataset_path, slice_rows=(0, 1)
-                        )
-                        if isinstance(sample_data, pd.DataFrame):
-                            columns = sample_data.columns.tolist()
-                        else:
-                            columns = []
-                    except Exception as e:
-                        print(f"Error getting sample data: {e}")
-                        columns = []
-                
-                # Update UI in main thread
-                self.dialog.after(0, lambda: self._on_columns_loaded(columns))
-                
-            except Exception as e:
-                # Handle error in main thread
-                self.dialog.after(0, lambda: self._on_columns_load_error(str(e)))
-        
-        # Start loading in background thread
-        thread = threading.Thread(target=load_columns_thread, daemon=True)
-        thread.start()
-
-    def _update_dataset_info(self, info: dict) -> None:
-        """Update the dataset info display"""
+    def _load_columns(self) -> None:
         try:
-            shape = info.get('shape', 'Unknown')
-            dtype = info.get('dtype', 'Unknown')
-            size = info.get('size', 'Unknown')
-            
-            if isinstance(size, int):
-                size_str = f"{size:,}"
+            # Use the updated get_dataset_info which now includes 'columns' for groups
+            info = self.file_handler.get_dataset_info(self.h5_file_path, self.dataset_path)
+            if 'columns' in info and info['columns']:
+                self.df_columns = info['columns']
             else:
-                size_str = str(size)
-            
-            info_text = f"Shape: {shape}\nType: {dtype}\nElements: {size_str}"
-            self.dataset_info_label.config(text=info_text)
-        except Exception as e:
-            self.dataset_info_label.config(text=f"Error loading info: {str(e)}")
-
-    def _on_columns_loaded(self, columns: List[str]) -> None:
-        """Called when columns are successfully loaded"""
-        try:
-            self.df_columns = columns
-            self.columns_loaded = True
-            self.loading = False
-            
-            # Initialize selection state for all columns (all unselected by default)
-            for col in self.df_columns:
-                if col not in self.column_selection_state:
-                    self.column_selection_state[col] = False
+                self.df_columns = [] # No columns found or not a tabular dataset
 
             if not self.df_columns:
-                self.loading_label.config(text="No columns found in dataset", bootstyle="warning")
+                Messagebox.show_warning(
+                    f"No columns could be identified for dataset '{self.dataset_path.split('/')[-1]}'. "
+                    "This might not be a tabular dataset or its structure is not recognized for column extraction.",
+                    title="No Columns Identified"
+                )
                 return
+
+            # Initialize filtered columns (no filter applied initially)
+            self.filtered_columns = self.df_columns.copy()
             
-            # Check if we have too many columns to display safely
-            if len(self.df_columns) > self.max_displayable_columns:
-                self.warning_label.config(
-                    text=f"⚠️ Large dataset ({len(self.df_columns)} columns). Use search to filter.", 
-                    bootstyle="warning"
-                )
-                # Hide loading label and show search instruction
-                self.loading_label.config(
-                    text=f"Dataset has {len(self.df_columns)} columns.\nUse search above to filter columns before displaying.",
-                    bootstyle="info"
-                )
-                
-                # Enable search but don't populate all columns yet
-                self.search_entry.config(state="normal")
-                self.clear_search_btn.config(state="normal")
-                
-                # Set up search trace now that columns are loaded
-                self.column_search_var.trace_add("write", self._filter_columns)
-                
-                # Enable other controls
-                self.preview_button.config(state="normal")
-                self.export_button.config(state="normal")
-                
-            else:
-                # Small dataset - can display all columns
-                self.loading_label.destroy()
-                self._populate_column_list(self.df_columns)
-                
-                # Enable all UI elements
-                self.search_entry.config(state="normal")
-                self.clear_search_btn.config(state="normal")
-                self.select_all_button.config(state="normal")
-                self.select_none_button.config(state="normal")
-                self.preview_button.config(state="normal")
-                self.export_button.config(state="normal")
-                
-                # Set up search trace now that columns are loaded
-                self.column_search_var.trace_add("write", self._filter_columns)
+            # Initialize column variables for all columns
+            self._initialize_column_vars()
+            
+            # Calculate pagination
+            self._update_pagination()
+            
+            # Display first page
+            self._populate_current_page()
             
         except Exception as e:
-            self._on_columns_load_error(str(e))
+            Messagebox.show_error(f"Failed to load dataset columns: {str(e)}", title="Error")
+            self.dialog.destroy()
 
-    def _on_columns_load_error(self, error_msg: str) -> None:
-        """Called when there's an error loading columns"""
-        self.loading = False
-        self.loading_label.config(text=f"Error loading columns: {error_msg}", bootstyle="danger")
-        
-        # Show error dialog
-        Messagebox.show_error(
-            f"Failed to load dataset columns: {error_msg}\n\n"
-            "This might be due to:\n"
-            "• Very large dataset size\n"
-            "• Unsupported dataset format\n"
-            "• Memory limitations",
-            title="Error Loading Dataset"
-        )
-
-    def _populate_column_list(self, columns_to_display: List[str]) -> None:
-        """Populate the column list with safety limits"""
-        if not self.columns_loaded:
-            return
-        
-        # Safety check - don't display too many columns at once
-        if len(columns_to_display) > self.max_displayable_columns:
-            # Show truncated message instead of creating thousands of widgets
-            self._show_truncated_message(len(columns_to_display))
-            return
-            
-        # Save current selection state before clearing
-        self._save_current_selection_state()
-        
-        # Clear existing checkboxes
-        for widget in self.scrollable_frame.winfo_children():
-            widget.destroy()
-        self.column_checkboxes.clear()
+    def _initialize_column_vars(self) -> None:
+        """Initialize BooleanVar for all columns"""
         self.column_vars.clear()
-
-        # Create checkboxes for the filtered columns
-        for i, col in enumerate(columns_to_display):
-            # Use the persistent selection state
-            initial_value = self.column_selection_state.get(col, False)
-            var = ttkb.BooleanVar(value=initial_value)
-            cb = ttkb.Checkbutton(self.scrollable_frame, text=col, variable=var, bootstyle="round-toggle")
-            cb.grid(row=i, column=0, sticky=W, pady=1, padx=5)
-            
-            self.column_checkboxes[col] = cb
-            self.column_vars[col] = var
-            # Add a trace to update selected_columns on change
+        for col in self.df_columns:
+            var = ttkb.BooleanVar(value=False)
             var.trace_add("write", self._update_selected_columns)
-        
-        # Update the canvas scroll region
-        self.scrollable_frame.update_idletasks()
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        
-        # Enable selection buttons
-        self.select_all_button.config(state="normal")
-        self.select_none_button.config(state="normal")
-        
-        self._update_selected_columns()
+            self.column_vars[col] = var
 
-    def _show_truncated_message(self, total_columns: int) -> None:
-        """Show message when too many columns to display"""
-        # Clear existing widgets
-        for widget in self.scrollable_frame.winfo_children():
+    def _update_pagination(self) -> None:
+        """Update pagination information based on filtered columns"""
+        self.total_pages = max(1, math.ceil(len(self.filtered_columns) / self.columns_per_page))
+        
+        # Reset to first page if current page is out of bounds
+        if self.current_page >= self.total_pages:
+            self.current_page = 0
+            
+        self._update_pagination_controls()
+
+    def _update_pagination_controls(self) -> None:
+        """Update pagination control states and labels"""
+        # Only update if UI elements have been created
+        if not hasattr(self, 'page_label') or not hasattr(self, 'prev_btn') or not hasattr(self, 'next_btn'):
+            return
+            
+        # Update page label
+        self.page_label.config(text=f"Page {self.current_page + 1} of {self.total_pages}")
+        
+        # Update button states
+        self.prev_btn.config(state=NORMAL if self.current_page > 0 else DISABLED)
+        self.next_btn.config(state=NORMAL if self.current_page < self.total_pages - 1 else DISABLED)
+
+    def _previous_page(self) -> None:
+        """Navigate to previous page"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self._populate_current_page()
+            self._update_pagination_controls()
+
+    def _next_page(self) -> None:
+        """Navigate to next page"""
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self._populate_current_page()
+            self._update_pagination_controls()
+
+    def _get_current_page_columns(self) -> List[str]:
+        """Get columns for the current page"""
+        start_idx = self.current_page * self.columns_per_page
+        end_idx = start_idx + self.columns_per_page
+        return self.filtered_columns[start_idx:end_idx]
+
+    def _populate_current_page(self) -> None:
+        """Populate the column list with current page columns"""
+        # Don't populate if UI isn't ready yet
+        if not hasattr(self, 'column_list_frame') or not self.column_list_frame.winfo_exists():
+            return
+            
+        # Clear existing checkboxes
+        for widget in self.column_list_frame.winfo_children():
             widget.destroy()
         self.column_checkboxes.clear()
-        self.column_vars.clear()
-        
-        # Show informative message
-        msg_label = ttkb.Label(
-            self.scrollable_frame, 
-            text=f"Too many columns to display ({total_columns} total).\n\n"
-                 "Please use the search box above to filter columns.\n"
-                 "Example searches:\n"
-                 "• 'gene' - shows columns containing 'gene'\n"
-                 "• 'cell_' - shows columns starting with 'cell_'\n"
-                 "• '001' - shows columns containing '001'",
-            font=("Segoe UI", 10), 
-            bootstyle="info",
-            justify="left"
-        )
-        msg_label.grid(row=0, column=0, pady=20, padx=10, sticky=W)
 
-    def _save_current_selection_state(self) -> None:
-        """Save the current selection state before rebuilding the list"""
-        for col, var in self.column_vars.items():
-            self.column_selection_state[col] = var.get()
+        current_page_columns = self._get_current_page_columns()
+
+        if not current_page_columns:
+            # No columns to display
+            no_cols_label = ttkb.Label(self.column_list_frame, text="No columns found", 
+                                      font=("Segoe UI", 10), bootstyle="secondary")
+            no_cols_label.pack(pady=20)
+            return
+
+        # Create a scrollable frame for checkboxes
+        canvas = ttkb.Canvas(self.column_list_frame, height=250)  # Set a fixed height
+        scrollbar = ttkb.Scrollbar(self.column_list_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttkb.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Create checkboxes for current page columns only
+        for col in current_page_columns:
+            var = self.column_vars[col]  # Use existing BooleanVar
+            cb = ttkb.Checkbutton(scrollable_frame, text=col, variable=var, bootstyle="round-toggle")
+            cb.pack(anchor=W, pady=2)
+            self.column_checkboxes[col] = cb
+
+        # Bind mouse wheel scrolling (cross-platform) with proper focus handling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        
+        def _on_mousewheel_linux(event):
+            if event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+
+        def _bind_mousewheel(event):
+            # Bind mouse wheel events when mouse enters the canvas area
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            canvas.bind_all("<Button-4>", _on_mousewheel_linux)
+            canvas.bind_all("<Button-5>", _on_mousewheel_linux)
+
+        def _unbind_mousewheel(event):
+            # Unbind mouse wheel events when mouse leaves the canvas area
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        # Bind enter/leave events to canvas and scrollable frame
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
+        scrollable_frame.bind("<Enter>", _bind_mousewheel)
+        scrollable_frame.bind("<Leave>", _unbind_mousewheel)
 
     def _filter_columns(self, *args) -> None:
-        if not self.columns_loaded:
+        """Filter columns based on search term"""
+        # Don't filter if columns haven't been loaded yet
+        if not hasattr(self, 'df_columns') or not self.df_columns:
             return
             
         search_term = self.column_search_var.get().lower()
-        if search_term == "search columns...":
-            search_term = ""
         
-        if not search_term:
-            # No search term - only show all if dataset is small enough
-            if len(self.df_columns) <= self.max_displayable_columns:
-                filtered_columns = self.df_columns
-            else:
-                # Too many columns - show none until user searches
-                filtered_columns = []
+        if not search_term or search_term == "search columns...":
+            # Show all columns
+            self.filtered_columns = self.df_columns.copy()
         else:
-            # Filter columns based on search
-            filtered_columns = [col for col in self.df_columns if search_term in col.lower()]
-            # Still limit the results to prevent UI overload
-            if len(filtered_columns) > self.max_displayable_columns:
-                filtered_columns = filtered_columns[:self.max_displayable_columns]
-                # Update warning to show truncation
-                self.warning_label.config(
-                    text=f"Showing first {self.max_displayable_columns} of {len([col for col in self.df_columns if search_term in col.lower()])} matches", 
-                    bootstyle="warning"
-                )
-            else:
-                self.warning_label.config(text="")
+            # Filter columns
+            self.filtered_columns = [
+                col for col in self.df_columns
+                if search_term in col.lower()
+            ]
         
-        self._populate_column_list(filtered_columns)
+        # Reset to first page and update
+        self.current_page = 0
+        self._update_pagination()
+        
+        # Only populate if UI is ready
+        if hasattr(self, 'column_list_frame'):
+            self._populate_current_page()
 
-    def _update_selected_columns(self, *args) -> None:
-        # Update the persistent state and the selected columns list
-        for col, var in self.column_vars.items():
-            self.column_selection_state[col] = var.get()
-        
-        self.selected_columns = [col for col, selected in self.column_selection_state.items() if selected]
-        self._preview_export() # Update preview whenever column selection changes
+    def _clear_search(self) -> None:
+        """Clear the search field"""
+        self.column_search_var.set("")
+
+    def _select_all_current_page(self) -> None:
+        """Select all columns on the current page"""
+        current_page_columns = self._get_current_page_columns()
+        for col in current_page_columns:
+            if col in self.column_vars:
+                self.column_vars[col].set(True)
 
     def _select_all_filtered_columns(self) -> None:
-        if not self.columns_loaded:
-            return
-            
-        for col, var in self.column_vars.items():
-            var.set(True)
-            self.column_selection_state[col] = True
-        
-        self._update_selected_columns()
+        """Select all filtered columns (across all pages)"""
+        for col in self.filtered_columns:
+            if col in self.column_vars:
+                self.column_vars[col].set(True)
 
-    def _select_none(self) -> None:
-        if not self.columns_loaded:
-            return
-            
-        for col, var in self.column_vars.items():
+    def _deselect_all_columns(self) -> None:
+        """Deselect all columns"""
+        for var in self.column_vars.values():
             var.set(False)
-            self.column_selection_state[col] = False
-        
-        self._update_selected_columns()
+
+    def _update_selected_columns(self, *args) -> None:
+        """Update the list of selected columns"""
+        self.selected_columns = [col for col, var in self.column_vars.items() if var.get()]
+        self._preview_export() # Update preview whenever column selection changes
 
     def _export_max_excel_rows(self) -> None:
         # Excel's row limit is 1,048,576
@@ -518,10 +400,6 @@ class ExportWindow:
         return sorted(list(set(rows))) # Remove duplicates and sort
 
     def _preview_export(self) -> None:
-        if not self.columns_loaded:
-            self.preview_label.config(text="Loading...", bootstyle="info")
-            return
-            
         selected_columns_count = len(self.selected_columns)
         row_selection_string = self.row_selection_entry.get()
         try:
@@ -530,16 +408,25 @@ class ExportWindow:
                 self.preview_label.config(text="Rows: Error × Columns: 0", bootstyle="danger")
                 return
 
-            # Get total rows from dataset info without loading data
-            try:
-                info = self.file_handler.get_dataset_info(self.h5_file_path, self.dataset_path)
-                total_dataset_rows = 0
-                if 'shape' in info and isinstance(info['shape'], tuple) and len(info['shape']) > 0:
-                    total_dataset_rows = info['shape'][0]
-                else:
-                    total_dataset_rows = 0  # Cannot determine reliably without loading data
-            except Exception:
-                total_dataset_rows = 0
+            estimated_rows = 0
+            # Get total rows from dataset info (assuming a 'shape' attribute)
+            info = self.file_handler.get_dataset_info(self.h5_file_path, self.dataset_path)
+            total_dataset_rows = 0
+            if 'shape' in info and isinstance(info['shape'], tuple) and len(info['shape']) > 0:
+                total_dataset_rows = info['shape'][0]
+            else:
+                # If shape not directly available, try to infer from data for preview
+                # This might involve reading a small part of the data which could be slow for very large files
+                try:
+                    sample_data, _ = self.file_handler.get_dataset_data(self.h5_file_path, self.dataset_path, max_elements=1) # Just get enough for shape
+                    if isinstance(sample_data, pd.DataFrame):
+                        total_dataset_rows = len(sample_data)
+                    elif hasattr(sample_data, 'shape') and len(sample_data.shape) > 0:
+                        total_dataset_rows = sample_data.shape[0]
+                    else:
+                        total_dataset_rows = 0
+                except Exception:
+                    total_dataset_rows = 0 # Cannot determine total rows reliably
 
             if parsed_rows is None:
                 estimated_rows = total_dataset_rows
@@ -554,10 +441,6 @@ class ExportWindow:
             self.preview_label.config(text=f"Error: {str(e)}", bootstyle="danger")
 
     def _export_csv(self) -> None:
-        if not self.columns_loaded:
-            Messagebox.show_warning("Columns are still loading. Please wait.", title="Still Loading")
-            return
-            
         if not self.selected_columns:
             Messagebox.show_warning("Please select at least one column to export.", title="No Columns Selected")
             return
@@ -581,195 +464,16 @@ class ExportWindow:
         if not file_path:
             return # User cancelled
 
-        # Show progress dialog and start export in background
-        self._show_export_progress(file_path, rows_to_export)
-
-    def _show_export_progress(self, output_path: str, rows_to_export: Optional[List[int]]) -> None:
-        """Show export progress dialog and handle export in background thread"""
-        # Create progress dialog
-        self.progress_dialog = ttkb.Toplevel(self.dialog)
-        self.progress_dialog.title("Exporting CSV...")
-        self.progress_dialog.geometry("500x200")
-        self.progress_dialog.transient(self.dialog)
-        self.progress_dialog.grab_set()
-        self.progress_dialog.resizable(False, False)
-        
-        # Center the progress dialog
-        self.progress_dialog.update_idletasks()
-        x = (self.dialog.winfo_screenwidth() // 2) - (250)
-        y = (self.dialog.winfo_screenheight() // 2) - (100)
-        self.progress_dialog.geometry(f"+{x}+{y}")
-        
-        # Progress dialog content
-        progress_frame = ttkb.Frame(self.progress_dialog, padding=20)
-        progress_frame.pack(fill=BOTH, expand=True)
-        
-        # Title
-        title_label = ttkb.Label(progress_frame, text="Exporting Dataset to CSV", 
-                                font=("Segoe UI", 12, "bold"))
-        title_label.pack(pady=(0, 15))
-        
-        # Status label
-        self.status_label = ttkb.Label(progress_frame, text="Initializing export...", 
-                                      font=("Segoe UI", 10))
-        self.status_label.pack(pady=(0, 10))
-        
-        # Progress bar
-        self.progress_var = ttkb.DoubleVar()
-        self.progress_bar = ttkb.Progressbar(progress_frame, variable=self.progress_var, 
-                                           length=400, mode='determinate')
-        self.progress_bar.pack(pady=(0, 10))
-        
-        # Percentage label
-        self.percentage_label = ttkb.Label(progress_frame, text="0%", 
-                                          font=("Segoe UI", 9))
-        self.percentage_label.pack(pady=(0, 15))
-        
-        # Cancel button
-        self.cancel_export = False
-        cancel_button = ttkb.Button(progress_frame, text="Cancel", 
-                                   command=self._cancel_export, bootstyle="danger-outline")
-        cancel_button.pack()
-        
-        # Start export in background thread
-        self.export_thread = threading.Thread(
-            target=self._export_worker, 
-            args=(output_path, rows_to_export),
-            daemon=True
-        )
-        self.export_thread.start()
-        
-        # Monitor progress
-        self._monitor_export_progress()
-
-    def _cancel_export(self) -> None:
-        """Cancel the ongoing export"""
-        self.cancel_export = True
-        self.status_label.config(text="Cancelling export...", bootstyle="warning")
-
-    def _export_worker(self, output_path: str, rows_to_export: Optional[List[int]]) -> None:
-        """Worker thread that performs the actual export with progress updates"""
         try:
-            # Update status
-            self.dialog.after(0, lambda: self.status_label.config(text="Reading dataset..."))
-            self.dialog.after(0, lambda: self._update_progress(10, "Loading data from HDF5 file..."))
-            
-            # Check for cancellation
-            if self.cancel_export:
-                return
-            
-            # Read the dataset
-            if rows_to_export is not None and len(rows_to_export) > 0:
-                # Check if rows are a continuous slice for efficiency
-                is_continuous_slice = (len(rows_to_export) > 0 and
-                                     all(rows_to_export[i] + 1 == rows_to_export[i+1] 
-                                         for i in range(len(rows_to_export)-1)))
-                if is_continuous_slice:
-                    start_row = min(rows_to_export)
-                    end_row = max(rows_to_export) + 1
-                    data_df = self.file_handler.read_dataset(
-                        self.h5_file_path, self.dataset_path, slice_rows=(start_row, end_row)
-                    )
-                else:
-                    # Read full dataset and filter
-                    data_df = self.file_handler.read_dataset(self.h5_file_path, self.dataset_path)
-                    if not self.cancel_export:
-                        self.dialog.after(0, lambda: self._update_progress(30, "Filtering selected rows..."))
-                        data_df = data_df.iloc[rows_to_export]
-            else:
-                # Read all data
-                data_df = self.file_handler.read_dataset(self.h5_file_path, self.dataset_path)
-            
-            if self.cancel_export:
-                return
-                
-            # Validate data type
-            if not isinstance(data_df, pd.DataFrame):
-                raise TypeError("Data read from HDF5 file is not a pandas DataFrame.")
-            
-            self.dialog.after(0, lambda: self._update_progress(50, "Filtering selected columns..."))
-            
-            # Filter columns
-            existing_columns = [col for col in self.selected_columns if col in data_df.columns]
-            if len(existing_columns) != len(self.selected_columns):
-                missing_cols = set(self.selected_columns) - set(existing_columns)
-                print(f"Warning: Missing columns will be skipped: {missing_cols}")
-            
-            data_df = data_df[existing_columns]
-            
-            if self.cancel_export:
-                return
-            
-            self.dialog.after(0, lambda: self._update_progress(70, "Writing CSV file..."))
-            
-            # Export to CSV with progress monitoring for large files
-            if len(data_df) > 100000:  # For large datasets, use chunked writing
-                self._export_large_csv(data_df, output_path)
-            else:
-                data_df.to_csv(output_path, index=False)
-                self.dialog.after(0, lambda: self._update_progress(100, "Export completed successfully!"))
-            
-            # Success
-            if not self.cancel_export:
-                self.dialog.after(0, self._export_success)
-                
+            self.dataframe_exporter.export_to_csv(
+                h5_file_path=self.h5_file_path,
+                dataset_path=self.dataset_path,
+                columns=self.selected_columns,
+                rows=rows_to_export,
+                output_csv_path=file_path
+            )
+            Messagebox.show_info("Dataset exported successfully!", title="Export Complete")
         except Exception as e:
-            if not self.cancel_export:
-                error_msg = str(e)
-                self.dialog.after(0, lambda: self._export_error(error_msg))
-
-    def _export_large_csv(self, data_df: pd.DataFrame, output_path: str) -> None:
-        """Export large dataframes in chunks with progress updates"""
-        chunk_size = 50000  # Write 50k rows at a time
-        total_rows = len(data_df)
-        
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            # Write header
-            data_df.head(0).to_csv(f, index=False)
-            
-            # Write data in chunks
-            for i in range(0, total_rows, chunk_size):
-                if self.cancel_export:
-                    return
-                    
-                end_idx = min(i + chunk_size, total_rows)
-                chunk = data_df.iloc[i:end_idx]
-                
-                # Write chunk (without header since we already wrote it)
-                chunk.to_csv(f, mode='a', header=False, index=False)
-                
-                # Update progress
-                progress = 70 + (30 * (end_idx / total_rows))  # 70-100% range
-                rows_written = end_idx
-                status_text = f"Writing CSV... ({rows_written:,} / {total_rows:,} rows)"
-                self.dialog.after(0, lambda p=progress, s=status_text: self._update_progress(p, s))
-        
-        if not self.cancel_export:
-            self.dialog.after(0, lambda: self._update_progress(100, "Export completed successfully!"))
-
-    def _update_progress(self, percentage: float, status_text: str) -> None:
-        """Update progress bar and status text"""
-        self.progress_var.set(percentage)
-        self.percentage_label.config(text=f"{percentage:.0f}%")
-        self.status_label.config(text=status_text)
-
-    def _monitor_export_progress(self) -> None:
-        """Monitor the export thread and handle completion"""
-        if self.export_thread.is_alive():
-            # Check again in 100ms
-            self.dialog.after(100, self._monitor_export_progress)
-        else:
-            # Thread finished, but don't close dialog yet - let success/error handlers do it
-            pass
-
-    def _export_success(self) -> None:
-        """Handle successful export completion"""
-        self.progress_dialog.destroy()
-        Messagebox.show_info("Dataset exported successfully!", title="Export Complete")
-        self.dialog.destroy()  # Close the main export dialog
-
-    def _export_error(self, error_msg: str) -> None:
-        """Handle export error"""
-        self.progress_dialog.destroy()
-        Messagebox.show_error(f"Failed to export dataset: {error_msg}", title="Export Error")
-        # Don't close the main dialog so user can try again
+            Messagebox.show_error(f"Failed to export dataset: {str(e)}", title="Export Error")
+        finally:
+            self.dialog.destroy() # Close the export dialog
