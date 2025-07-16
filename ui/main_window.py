@@ -45,7 +45,7 @@ class MainWindow:
         self.file_upload = FileUpload(main_frame, self._on_file_uploaded)
         self.file_upload.create_ui(row=1)
 
-        self.dataset_list = DatasetList(main_frame, self._on_dataset_selected)
+        self.dataset_list = DatasetList(main_frame, self._on_dataset_selected, current_file=self.current_file)
         self.dataset_list.create_ui(row=2)
 
     def _create_title(self, parent: ttkb.Frame) -> None:
@@ -69,8 +69,8 @@ class MainWindow:
         # Title Label
         ttkb.Label(
             label_container,
-            text="h5 CRUNCHER 2",
-            font=("Segoe UI", 25, "bold"),
+            text="h5 CRUNCHER",
+            font=("Verdana", 25, "bold"),
             bootstyle="primary"
         ).pack(anchor=W, pady=(0, 0))  # No padding between
 
@@ -79,13 +79,13 @@ class MainWindow:
             label_container,
             text="Curate, Review, Unpack, Navigate, Convert, Handle, Explore, Retrieve",
             font=("Segoe UI", 10),
-            bootstyle="Dark"
+            bootstyle="success"
         ).pack(anchor=W, pady=(0, 0))  # Still no padding
 
         ttkb.Label(
             label_container,
             text="Atticus Nafziger 2025",
-            font=("Segoe UI", 10),
+            font=("Segoe UI", 8),
             bootstyle="secondary"
         ).pack(anchor=W, pady=(0, 0))  # Still no padding
 
@@ -105,7 +105,7 @@ class MainWindow:
 
             self.datasets = self.file_handler.get_datasets(file_path)
             self.current_file = file_path
-
+            self.dataset_list.current_file = file_path
             self.dataset_list.update_datasets(self.datasets)
 
             #Messagebox.show_info(f"Successfully loaded {len(self.datasets)} datasets", title="Success")

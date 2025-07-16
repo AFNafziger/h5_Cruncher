@@ -6,14 +6,14 @@ Handles the scrollable list of datasets
 import tkinter as tk
 from tkinter import ttk
 from typing import List, Callable, Optional
-
-
+from core.h5_file_handler import H5FileHandler
 class DatasetList:
     """Handles the scrollable dataset list UI"""
     
-    def __init__(self, parent: ttk.Frame, callback: Callable[[str], None]):
+    def __init__(self, parent: ttk.Frame, callback: Callable[[str], None], current_file: Optional[str] = None):
         self.parent = parent
         self.callback = callback
+        self.current_file = current_file
         self.datasets: List[str] = []
         
         # UI elements
@@ -57,7 +57,7 @@ class DatasetList:
         search_frame.grid_columnconfigure(1, weight=1)
         
         # Search label
-        search_label = ttk.Label(search_frame, text="🔍 Filter:")
+        search_label = ttk.Label(search_frame, text="Filter:")
         search_label.grid(row=0, column=0, padx=(0, 8))
         
         # Search entry
@@ -155,10 +155,11 @@ class DatasetList:
         self.canvas.bind('<Enter>', bind_to_mousewheel)
         self.canvas.bind('<Leave>', unbind_from_mousewheel)
     
+
     def _create_dataset_buttons(self, datasets: List[str]) -> None:
         """
         Create buttons for the dataset list
-        
+
         Args:
             datasets: List of dataset paths to create buttons for
         """
@@ -166,31 +167,41 @@ class DatasetList:
         for button in self.dataset_buttons:
             button.destroy()
         self.dataset_buttons.clear()
-        
-        # Create new buttons
+
+        file_handler = H5FileHandler()  # Create an instance to check exportability
+
         for i, dataset_path in enumerate(datasets):
-            # Create button with dataset path
+            # Check if dataset is exportable (has columns)
+            try:
+                info = file_handler.get_dataset_info(self.current_file, dataset_path)
+                #print(f"INFO for {dataset_path}: {info}")
+                is_exportable = isinstance(info.get("columns"), list) and len(info["columns"]) > 0
+            except Exception as e:
+                #print(f"Error for {dataset_path}: {e}")
+                is_exportable = False
+
+            # Use secondary style if exportable, otherwise default
+            style = {"bootstyle": "success"} if is_exportable else {}
+            #print(is_exportable)
             btn = ttk.Button(
                 self.scrollable_frame,
                 text=self._format_dataset_name(dataset_path),
                 command=lambda path=dataset_path: self.callback(path),
-                width=70
+                width=70,
+                **style
             )
             btn.grid(row=i, column=0, sticky=(tk.W, tk.E), padx=5, pady=3)
-            
-            # Add hover effect
+
             self._add_hover_effect(btn)
-            
-            # Store button reference
             self.dataset_buttons.append(btn)
-        
+
         # Add count label
         if datasets:
-            count_label = ttk.Label(self.scrollable_frame, 
+            count_label = ttk.Label(self.scrollable_frame,
                                   text=f"Total: {len(datasets)} dataset{'s' if len(datasets) != 1 else ''}",
                                   font=("TkDefaultFont", 8), foreground="gray")
             count_label.grid(row=len(datasets), column=0, pady=(15, 5))
-            self.dataset_buttons.append(count_label)  # Store for cleanup
+            self.dataset_buttons.append(count_label)
     
     def _format_dataset_name(self, dataset_path: str) -> str:
         """

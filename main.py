@@ -41,6 +41,6 @@ def main():
 
 
 if __name__ == "__main__":
-    root = Window(themename="flatly")  # Or "darkly", "flatly", etc.
+    root = Window(themename="sandstone")  # Or "darkly", "flatly", etc.
     app = MainWindow(root)
     app.run()
