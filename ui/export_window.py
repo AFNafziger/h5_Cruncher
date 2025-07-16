@@ -133,7 +133,7 @@ class ExportWindow:
         right_frame.grid_rowconfigure(1, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
 
-        ttkb.Label(right_frame, text="Select Rows (e.g., 1-100,200,500-1000):", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
+        ttkb.Label(right_frame, text="Select Rows (e.g., 1-100,200,500):", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
         self.row_selection_entry = ttkb.Entry(right_frame, bootstyle="info")
         self.row_selection_entry.grid(row=1, column=0, sticky=EW, pady=(0, 10))
         self.row_selection_entry.insert(0, "Leave blank for all rows")
@@ -154,7 +154,7 @@ class ExportWindow:
         self.preview_label = ttkb.Label(bottom_frame, text="Rows: 0 × Columns: 0", font=("Segoe UI", 10))
         self.preview_label.grid(row=0, column=0, sticky=W)
 
-        ttkb.Button(bottom_frame, text="Preview", command=self._preview_export, bootstyle="secondary").grid(row=0, column=1, sticky=EW, padx=10)
+        ttkb.Button(bottom_frame, text="Preview (Do Before Export)", command=self._preview_export, bootstyle="info").grid(row=0, column=1, sticky=EW, padx=10)
         ttkb.Button(bottom_frame, text="Export CSV", command=self._export_csv, bootstyle="success").grid(row=0, column=2, sticky=E)
 
     def _load_columns(self) -> None:
