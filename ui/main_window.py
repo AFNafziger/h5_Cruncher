@@ -11,6 +11,7 @@ from ui.dataset_inspector import DatasetInspector
 from ui.dataset_list import DatasetList
 from ui.file_upload import FileUpload
 from ui.export_window import ExportWindow
+from ui.specific_instance_export_window import SpecificInstanceExportWindow
 from core.dataframe_exporter import DataFrameExporter
 
 class MainWindow:
@@ -45,7 +46,7 @@ class MainWindow:
         self.file_upload = FileUpload(main_frame, self._on_file_uploaded)
         self.file_upload.create_ui(row=1)
 
-        self.dataset_list = DatasetList(main_frame, self._on_dataset_selected, current_file=self.current_file)
+        self.dataset_list = DatasetList(main_frame, self._on_dataset_selected)
         self.dataset_list.create_ui(row=2)
 
     def _create_title(self, parent: ttkb.Frame) -> None:
@@ -69,8 +70,8 @@ class MainWindow:
         # Title Label
         ttkb.Label(
             label_container,
-            text="h5 CRUNCHER",
-            font=("Verdana", 25, "bold"),
+            text="h5 CRUNCHER 2",
+            font=("Segoe UI", 25, "bold"),
             bootstyle="primary"
         ).pack(anchor=W, pady=(0, 0))  # No padding between
 
@@ -79,13 +80,13 @@ class MainWindow:
             label_container,
             text="Curate, Review, Unpack, Navigate, Convert, Handle, Explore, Retrieve",
             font=("Segoe UI", 10),
-            bootstyle="success"
+            bootstyle="Dark"
         ).pack(anchor=W, pady=(0, 0))  # Still no padding
 
         ttkb.Label(
             label_container,
             text="Atticus Nafziger 2025",
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 10),
             bootstyle="secondary"
         ).pack(anchor=W, pady=(0, 0))  # Still no padding
 
@@ -105,7 +106,7 @@ class MainWindow:
 
             self.datasets = self.file_handler.get_datasets(file_path)
             self.current_file = file_path
-            self.dataset_list.current_file = file_path
+
             self.dataset_list.update_datasets(self.datasets)
 
             #Messagebox.show_info(f"Successfully loaded {len(self.datasets)} datasets", title="Success")
@@ -142,6 +143,15 @@ class MainWindow:
         # Instantiate and show the ExportWindow
         ExportWindow(self.root, self.current_file, dataset_path)
 
+    def _specific_instance_export(self, dataset_path: str, dialog: ttkb.Toplevel) -> None:
+        """Handle specific instance export button click"""
+        dialog.destroy()
+        if not self.current_file:
+            Messagebox.show_error("No file loaded", title="Error")
+            return
+        # Instantiate and show the SpecificInstanceExportWindow
+        SpecificInstanceExportWindow(self.root, self.current_file, dataset_path)
+
     def _create_options_dialog_content(self, dialog: ttkb.Toplevel, dataset_path: str) -> None:
         main_frame = ttkb.Frame(dialog, padding=25)
         main_frame.pack(fill=BOTH, expand=True)
@@ -172,10 +182,12 @@ class MainWindow:
                              command=lambda: self._export_dataset(dataset_path, dialog))
         export_btn.pack(side=LEFT, padx=10)
 
+        # Enable the specific instance button and connect it to the new functionality
         instance_btn = ttkb.Button(button_frame, text="Specific Instance",
-                                 bootstyle="success", state=DISABLED)
+                                 bootstyle="info",
+                                 command=lambda: self._specific_instance_export(dataset_path, dialog))
         instance_btn.pack(side=LEFT, padx=10)
-        self._create_tooltip(instance_btn, "Instance functionality coming soon!")
+        self._create_tooltip(instance_btn, "Export rows where a specific column equals a specific value")
 
         dialog.bind('<Return>', lambda e: self._inspect_dataset(dataset_path, dialog))
         dialog.bind('<Escape>', lambda e: dialog.destroy())
@@ -215,6 +227,6 @@ class MainWindow:
 
 
 if __name__ == "__main__":
-    app = ttkb.Window(themename="darkly")
+    app = ttkb.Window(themename="d")
     main_window = MainWindow(app)
     main_window.run()
