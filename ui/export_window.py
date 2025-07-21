@@ -133,7 +133,7 @@ class ExportWindow:
         right_frame.grid_rowconfigure(1, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
 
-        ttkb.Label(right_frame, text="Select Rows (e.g., 1-100,200,500):", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
+        ttkb.Label(right_frame, text="Select Rows (e.g., 1-100,200):", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky=W, pady=(0, 10))
         self.row_selection_entry = ttkb.Entry(right_frame, bootstyle="info")
         self.row_selection_entry.grid(row=1, column=0, sticky=EW, pady=(0, 10))
         self.row_selection_entry.insert(0, "Leave blank for all rows")

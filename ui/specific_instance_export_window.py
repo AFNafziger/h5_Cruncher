@@ -85,7 +85,7 @@ class SpecificInstanceExportWindow:
         search_entry.insert(0, "Search columns...")
         search_entry.bind("<FocusIn>", lambda e: search_entry.delete(0, END) if search_entry.get() == "Search columns..." else None)
 
-        clear_search_btn = ttkb.Button(search_frame, text="✕", width=3, command=self._clear_search, bootstyle="secondary-outline")
+        clear_search_btn = ttkb.Button(search_frame, text="✕", width=3, command=self._clear_search, bootstyle="secondary-danger")
         clear_search_btn.grid(row=0, column=2)
 
         # Column list frame (scrollable)
@@ -129,19 +129,50 @@ class SpecificInstanceExportWindow:
         right_frame.grid_columnconfigure(0, weight=1)
 
         # Value input
-        ttkb.Label(right_frame, text="Enter value to match:", bootstyle="primary").grid(row=0, column=0, sticky=W, pady=(0, 10))
+        ttkb.Label(right_frame, text="Enter exact value to match:", bootstyle="primary").grid(row=0, column=0, sticky=W, pady=(0, 5))
+        
+        # Hint text
+        ttkb.Label(right_frame, text="(Press Enter or click Search to find matches)", bootstyle="secondary").grid(row=0, column=0, sticky=E, pady=(0, 5))
+        
+        # Value input frame with entry and search button
+        value_frame = ttkb.Frame(right_frame)
+        value_frame.grid(row=1, column=0, sticky=EW, pady=(0, 15))
+        value_frame.grid_columnconfigure(0, weight=1)
         
         self.value_var = ttkb.StringVar()
-        self.value_var.trace_add("write", self._on_value_changed)
-        self.value_entry = ttkb.Entry(right_frame, textvariable=self.value_var, bootstyle="info")
-        self.value_entry.grid(row=1, column=0, sticky=EW, pady=(0, 15))
+        # Remove automatic trace - we'll search manually with button
+        self.value_entry = ttkb.Entry(value_frame, textvariable=self.value_var, bootstyle="info")
+        self.value_entry.grid(row=0, column=0, sticky=EW, padx=(0, 5))
+        
+        # Add clear button
+        clear_value_btn = ttkb.Button(
+            value_frame, 
+            text="✕", 
+            width=3,
+            bootstyle="danger-outline",
+            command=self._clear_value
+        )
+        clear_value_btn.grid(row=0, column=1, padx=(0, 5))
+        
+        # Add search button
+        self.search_button = ttkb.Button(
+            value_frame, 
+            text="Search", 
+            bootstyle="success-outline",
+            command=self._search_for_matches
+        )
+        self.search_button.grid(row=0, column=2)
+        
+        # Bind Enter key to search as well
+        self.value_entry.bind('<Return>', lambda e: self._search_for_matches())
 
         # Preview section
         ttkb.Label(right_frame, text="Preview:", bootstyle="primary").grid(row=2, column=0, sticky=W, pady=(0, 10))
-        
+        ttkb.Label(right_frame, text="This may take a while on large datasets", bootstyle="danger").grid(row=2, column=0, sticky=W, pady=(0, 10))
+
         self.preview_label = ttkb.Label(
             right_frame, 
-            text="Select column and enter value",
+            text="Select column and enter exact value",
             bootstyle="secondary",
             wraplength=300
         )
@@ -168,7 +199,7 @@ class SpecificInstanceExportWindow:
         # Status/Info
         self.status_label = ttkb.Label(
             bottom_frame, 
-            text="Ready - Select column and value to continue",
+            text="Ready - Select column, enter value, then click Search",
             bootstyle="info"
         )
         self.status_label.grid(row=0, column=0, sticky=W)
@@ -382,35 +413,66 @@ class SpecificInstanceExportWindow:
         if hasattr(self, 'column_var'):
             self.column_var.set("")
         self.selected_column = None
-        self._update_preview()
+        self._reset_preview()
+
+    def _clear_value(self) -> None:
+        """Clear the search value"""
+        self.value_var.set("")
+        self.search_value = ""
+        self._reset_preview()
 
     # SPECIFIC INSTANCE METHODS (unique to this window)
     
     def _on_column_selected(self, *args) -> None:
         """Handle column selection"""
         self.selected_column = self.column_var.get()
+        # Reset preview when column changes
+        self._reset_preview()
+
+    def _search_for_matches(self) -> None:
+        """Search for matches when button is clicked or Enter is pressed"""
+        self.search_value = self.value_var.get().strip()
+        if not self.search_value:
+            self._reset_preview()
+            return
         self._update_preview()
 
-    def _on_value_changed(self, *args) -> None:
-        """Handle value input change"""
-        self.search_value = self.value_var.get()
-        self._update_preview()
+    def _reset_preview(self) -> None:
+        """Reset the preview to initial state"""
+        self.preview_label.config(text="Select column, enter value, then click Search", bootstyle="secondary")
+        self.sample_text.config(state="normal")
+        self.sample_text.delete(1.0, END)
+        self.sample_text.insert(END, "No preview available")
+        self.sample_text.config(state="disabled")
+        self.export_button.config(state="disabled")
+        self.status_label.config(text="Ready - Select column, enter value, then click Search", bootstyle="info")
 
     def _update_preview(self) -> None:
         """Update the preview based on current selection"""
-        if not self.selected_column or not self.search_value:
-            self.preview_label.config(text="Select column and enter value", bootstyle="secondary")
+        if not self.selected_column:
+            self.preview_label.config(text="Please select a column first", bootstyle="warning")
             self.sample_text.config(state="normal")
             self.sample_text.delete(1.0, END)
-            self.sample_text.insert(END, "No preview available")
+            self.sample_text.insert(END, "No column selected")
             self.sample_text.config(state="disabled")
             self.export_button.config(state="disabled")
-            self.status_label.config(text="Ready - Select column and value to continue", bootstyle="info")
+            self.status_label.config(text="Select a column first", bootstyle="warning")
+            return
+            
+        if not self.search_value:
+            self.preview_label.config(text="Enter a value and click Search", bootstyle="secondary")
+            self.sample_text.config(state="normal")
+            self.sample_text.delete(1.0, END)
+            self.sample_text.insert(END, "No search value entered")
+            self.sample_text.config(state="disabled")
+            self.export_button.config(state="disabled")
+            self.status_label.config(text="Enter a value and click Search", bootstyle="info")
             return
 
         try:
             # Load the dataset and filter it
-            self.status_label.config(text="Loading data...", bootstyle="warning")
+            self.status_label.config(text="Searching for matches...", bootstyle="warning")
+            self.search_button.config(state="disabled", text="Searching...")
             self.dialog.update()
 
             # Read the dataset
@@ -446,7 +508,7 @@ class SpecificInstanceExportWindow:
 
             if self.preview_rows == 0:
                 self.preview_label.config(
-                    text=f"No rows found where '{self.selected_column}' matches '{self.search_value}'",
+                    text=f"No rows found where '{self.selected_column}' exactly equals '{self.search_value}'",
                     bootstyle="warning"
                 )
                 self.sample_text.config(state="normal")
@@ -485,6 +547,9 @@ class SpecificInstanceExportWindow:
             self.sample_text.config(state="disabled")
             self.export_button.config(state="disabled")
             self.status_label.config(text="Error occurred", bootstyle="danger")
+        finally:
+            # Re-enable search button
+            self.search_button.config(state="normal", text="🔍 Search")
 
     def _export_csv(self) -> None:
         """Export the filtered data to CSV"""
@@ -494,7 +559,7 @@ class SpecificInstanceExportWindow:
 
         # Confirm export
         confirm_text = (f"Export {self.preview_rows:,} rows × {self.preview_columns} columns "
-                       f"where '{self.selected_column}' matches '{self.search_value}'?")
+                       f"where '{self.selected_column}' exactly equals '{self.search_value}'?")
         if not Messagebox.okcancel(confirm_text, title="Confirm Export"):
             return
 

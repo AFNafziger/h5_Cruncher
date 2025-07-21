@@ -184,7 +184,7 @@ class MainWindow:
 
         # Enable the specific instance button and connect it to the new functionality
         instance_btn = ttkb.Button(button_frame, text="Specific Instance",
-                                 bootstyle="info",
+                                 bootstyle="success",
                                  command=lambda: self._specific_instance_export(dataset_path, dialog))
         instance_btn.pack(side=LEFT, padx=10)
         self._create_tooltip(instance_btn, "Export rows where a specific column equals a specific value")
