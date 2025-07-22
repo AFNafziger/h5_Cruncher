@@ -28,7 +28,7 @@ class MainWindow:
         self._center_window()
 
     def _setup_window(self) -> None:
-        self.root.title("h5_cruncher2 - HDF5 Dataset Viewer")
+        self.root.title("h5_Cruncher - HDF5 Dataset Viewer")
         self.root.geometry("750x600")
         self.root.resizable(True, True)
         self.root.minsize(600, 400)
@@ -70,7 +70,7 @@ class MainWindow:
         # Title Label
         ttkb.Label(
             label_container,
-            text="h5 CRUNCHER 2",
+            text="h5 CRUNCHER",
             font=("Segoe UI", 25, "bold"),
             bootstyle="primary"
         ).pack(anchor=W, pady=(0, 0))  # No padding between
@@ -224,7 +224,6 @@ class MainWindow:
         self.inspector.close_inspector()
         self.root.quit()
         self.root.destroy()
-
 
 if __name__ == "__main__":
     app = ttkb.Window(themename="d")

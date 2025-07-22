@@ -34,5 +34,5 @@ h5_Cruncher can be used to create large CSV files from h5 data, which can allow 
 <!> If planning to use datasets in Excel or other software, confirm the maximum data frame size usable by your planned application
 <!> With large exports (around a million rows), exporting may take some time, especially on limited core usage from SCC
 
-When exporting, data frames are split into smaller chunks and compiled into a CSV to avoid exploding your computer.
+When exporting, data frames are split into smaller chunks and compiled into a CSV to avoid exploding your computer before being recombined into the final CSV.
 

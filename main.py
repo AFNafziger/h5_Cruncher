@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 h5_cruncher2 - Main application entry point
-Author: Your Name
-Platform: Linux (Boston University SCC)
+Author: Atticus Nafziger with contributions from Claude and ChatGPT
 """
 from ttkbootstrap import Window 
 import tkinter as tk
@@ -20,13 +19,8 @@ from ui.main_window import MainWindow
 def main():
     """Main entry point for the application"""
     try:
-        # Create the main Tkinter root
         root = tk.Tk()
-        
-        # Initialize the main application window
         app = MainWindow(root)
-        
-        # Start the application
         app.run()
         
     except ImportError as e:
@@ -41,6 +35,6 @@ def main():
 
 
 if __name__ == "__main__":
-    root = Window(themename="sandstone")  # Or "darkly", "flatly", etc.
+    root = Window(themename="sandstone")
     app = MainWindow(root)
     app.run()

@@ -76,6 +76,14 @@ class FileUpload:
         )
         hint_label.grid(row=1, column=0, columnspan=3, sticky=W, pady=(8, 0))
 
+        help_button = ttkb.Button(
+            self.upload_frame,
+            text="Help",
+            bootstyle="info",
+            command=self._open_help_window
+        )
+        help_button.grid(row=2, column=0, columnspan=3, sticky=W, pady=(10, 0))
+
     def _select_file(self) -> None:
         try:
             file_path = filedialog.askopenfilename(
@@ -151,3 +159,54 @@ class FileUpload:
             self._process_file(file_path)
         else:
             raise ValueError(f"Invalid file path: {file_path}")
+        
+    def _open_help_window(self) -> None:
+        root = self.parent.winfo_toplevel()
+        help_win = ttkb.Toplevel(root)
+        help_win.title("Help")
+        help_win.geometry("500x300")
+        help_win.resizable(True, True)
+        help_win.transient(root)
+        help_win.grab_set()
+
+        # Center the help window
+        help_win.update_idletasks()
+        x = (help_win.winfo_screenwidth() // 2) - (help_win.winfo_width() // 2)
+        y = (help_win.winfo_screenheight() // 2) - (help_win.winfo_height() // 2)
+        help_win.geometry(f"+{x}+{y}")
+
+        # Create a canvas and a vertical scrollbar for scrolling
+        canvas = tk.Canvas(help_win, borderwidth=0, highlightthickness=0)
+        vscroll = ttkb.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttkb.Frame(canvas, padding=20)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=vscroll.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        vscroll.pack(side="right", fill="y")
+
+        help_label = ttkb.Label(
+            scrollable_frame,
+            text="Welcome to h5 Cruncher, a useful tool for exploring the unintuitive "
+                 "structure of h5 files as well as exporting portions or special selections"
+                 " of them to CSV files. To explore the structure of an h5 file, load the "
+                 "file in the File Upload window and click around on the data frames that "
+                 "appear BLUE may inform the column names of exportable data frames that do "
+                 "not include them. \n\n Once you click on a GREEN dataframe, you will be given "
+                 "three options of inspecting, exporting, or selecting a specific instance export."
+                 "\n\nSpecific Instance Export Explained: Unsure of a better name to be honest. Specific instance export is used for creating a dataframe based on the value of a feature. For example, you have an h5 of cars with various features. You would use Specific Instance if you wanted to retrieve a CSV of just red cars along with their other atributes like make and model. Specific Instance Export takes a specific column with a specific value and creates a dataframe based on that."
+                 "\n\nRegular exporting is simpler. Just select what columns you would like to have for your CSV and then optionally select which rows you would like, similar to selecting pages for a printer to print (typing \"1-100, 102, 104\" would give you 102 rows). "
+                 "\n\nWhen working with large datasets, it can take a while exporting or sorting through values so please be patient.  ",
+            font=("Segoe UI", 11),
+            justify=LEFT,
+            wraplength=450
+        )
+        help_label.pack(anchor=N, expand=True, fill="both")

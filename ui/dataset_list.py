@@ -81,7 +81,7 @@ class DatasetList:
     def _show_no_file_message(self) -> None:
         """Show the 'no file loaded' message"""
         self.no_file_label = ttk.Label(self.list_frame, 
-                                      text="📂 Load an HDF5 file to view datasets",
+                                      text="Load an H5 file to view datasets",
                                       font=("TkDefaultFont", 11, "italic"),
                                       foreground="gray")
         self.no_file_label.grid(row=1, column=0, pady=50)
