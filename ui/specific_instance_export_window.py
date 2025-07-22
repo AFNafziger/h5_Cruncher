@@ -85,7 +85,7 @@ class SpecificInstanceExportWindow:
         search_entry.insert(0, "Search columns...")
         search_entry.bind("<FocusIn>", lambda e: search_entry.delete(0, END) if search_entry.get() == "Search columns..." else None)
 
-        clear_search_btn = ttkb.Button(search_frame, text="✕", width=3, command=self._clear_search, bootstyle="secondary-danger")
+        clear_search_btn = ttkb.Button(search_frame, text="✕", width=3, command=self._clear_search, bootstyle="secondary-outline")
         clear_search_btn.grid(row=0, column=2)
 
         # Column list frame (scrollable)
@@ -149,7 +149,7 @@ class SpecificInstanceExportWindow:
             value_frame, 
             text="✕", 
             width=3,
-            bootstyle="danger-outline",
+            bootstyle="secondary-outline",
             command=self._clear_value
         )
         clear_value_btn.grid(row=0, column=1, padx=(0, 5))
@@ -157,7 +157,7 @@ class SpecificInstanceExportWindow:
         # Add search button
         self.search_button = ttkb.Button(
             value_frame, 
-            text="Search", 
+            text="🔍 Search", 
             bootstyle="success-outline",
             command=self._search_for_matches
         )
@@ -168,8 +168,7 @@ class SpecificInstanceExportWindow:
 
         # Preview section
         ttkb.Label(right_frame, text="Preview:", bootstyle="primary").grid(row=2, column=0, sticky=W, pady=(0, 10))
-        ttkb.Label(right_frame, text="This may take a while on large datasets", bootstyle="danger").grid(row=2, column=0, sticky=W, pady=(0, 10))
-
+        
         self.preview_label = ttkb.Label(
             right_frame, 
             text="Select column and enter exact value",
@@ -448,7 +447,7 @@ class SpecificInstanceExportWindow:
         self.status_label.config(text="Ready - Select column, enter value, then click Search", bootstyle="info")
 
     def _update_preview(self) -> None:
-        """Update the preview based on current selection"""
+        """Update the preview based on current selection using chunk-based processing for large datasets"""
         if not self.selected_column:
             self.preview_label.config(text="Please select a column first", bootstyle="warning")
             self.sample_text.config(state="normal")
@@ -470,41 +469,144 @@ class SpecificInstanceExportWindow:
             return
 
         try:
-            # Load the dataset and filter it
-            self.status_label.config(text="Searching for matches...", bootstyle="warning")
-            self.search_button.config(state="disabled", text="Searching...")
+            # Initialize search with progress tracking
+            self.status_label.config(text="Initializing search...", bootstyle="warning")
+            self.search_button.config(state="disabled", text="🔄 Searching...")
             self.dialog.update()
-
-            # Read the dataset
-            full_data = self.file_handler.read_dataset(self.h5_file_path, self.dataset_path)
             
-            if not isinstance(full_data, pd.DataFrame):
-                raise ValueError("Dataset is not in a compatible format for filtering")
+            print(f"\n=== SPECIFIC INSTANCE SEARCH ===")
+            print(f"Dataset: {self.dataset_path}")
+            print(f"Column: {self.selected_column}")
+            print(f"Search Value: '{self.search_value}'")
+            print(f"Starting chunk-based processing...")
 
-            # Filter the data
-            if self.selected_column not in full_data.columns:
-                raise ValueError(f"Column '{self.selected_column}' not found in dataset")
-
-            # Handle different data types for exact comparison
-            column_data = full_data[self.selected_column]
+            # Get dataset info to determine total size
+            info = self.file_handler.get_dataset_info(self.h5_file_path, self.dataset_path)
+            total_rows = 0
             
-            # Try exact matching based on data type
-            if pd.api.types.is_numeric_dtype(column_data):
-                try:
-                    # For numeric columns, try to convert search value to number for exact match
-                    search_value_converted = pd.to_numeric(self.search_value)
-                    mask = column_data == search_value_converted
-                except (ValueError, TypeError):
-                    # If conversion fails, do exact string comparison
-                    mask = column_data.astype(str) == str(self.search_value)
+            if 'shape' in info and isinstance(info['shape'], tuple) and len(info['shape']) > 0:
+                total_rows = info['shape'][0]
             else:
-                # For non-numeric data, do exact string matching
-                mask = column_data.astype(str) == str(self.search_value)
+                # Try to get a quick sample to determine total rows
+                try:
+                    sample_data = self.file_handler.read_dataset(self.h5_file_path, self.dataset_path, slice_rows=(0, 1))
+                    if isinstance(sample_data, pd.DataFrame):
+                        # For pandas HDF, we need to read without slice to get full length
+                        full_data_info = self.file_handler.read_dataset(self.h5_file_path, self.dataset_path)
+                        total_rows = len(full_data_info)
+                    else:
+                        total_rows = 1000000  # Default fallback
+                except:
+                    total_rows = 1000000  # Default fallback
 
-            self.filtered_df = full_data[mask].copy()
+            print(f"Total dataset rows: {total_rows:,}")
             
+            # Determine chunk size based on dataset size
+            if total_rows > 10000000:  # 10M+ rows
+                chunk_size = 500000  # 500K rows per chunk
+            elif total_rows > 1000000:  # 1M+ rows
+                chunk_size = 100000   # 100K rows per chunk
+            elif total_rows > 100000:   # 100K+ rows
+                chunk_size = 50000    # 50K rows per chunk
+            else:
+                chunk_size = total_rows  # Process all at once for small datasets
+            
+            print(f"Using chunk size: {chunk_size:,} rows")
+            
+            # Initialize results
+            self.filtered_df = pd.DataFrame()
+            total_matches = 0
+            chunks_processed = 0
+            total_chunks = (total_rows + chunk_size - 1) // chunk_size
+            
+            print(f"Total chunks to process: {total_chunks}")
+            
+            # Process data in chunks
+            for start_row in range(0, total_rows, chunk_size):
+                end_row = min(start_row + chunk_size, total_rows)
+                chunks_processed += 1
+                
+                # Update progress
+                progress_pct = (chunks_processed / total_chunks) * 100
+                self.status_label.config(
+                    text=f"Processing chunk {chunks_processed}/{total_chunks} ({progress_pct:.1f}%)", 
+                    bootstyle="warning"
+                )
+                self.dialog.update()
+                
+                print(f"Processing chunk {chunks_processed}/{total_chunks}: rows {start_row:,} to {end_row-1:,}")
+                
+                try:
+                    # Read chunk of data
+                    if start_row == 0 and end_row >= total_rows:
+                        # Single chunk - read all data
+                        chunk_data = self.file_handler.read_dataset(self.h5_file_path, self.dataset_path)
+                    else:
+                        # Read specific chunk
+                        chunk_data = self.file_handler.read_dataset(
+                            self.h5_file_path, self.dataset_path, slice_rows=(start_row, end_row)
+                        )
+                    
+                    if not isinstance(chunk_data, pd.DataFrame):
+                        print(f"Warning: Chunk {chunks_processed} is not a DataFrame, skipping...")
+                        continue
+                    
+                    # Check if selected column exists in this chunk
+                    if self.selected_column not in chunk_data.columns:
+                        print(f"Warning: Column '{self.selected_column}' not found in chunk {chunks_processed}, skipping...")
+                        continue
+                    
+                    # Filter chunk for matching values
+                    column_data = chunk_data[self.selected_column]
+                    
+                    # Apply exact matching based on data type
+                    if pd.api.types.is_numeric_dtype(column_data):
+                        try:
+                            # For numeric columns, try to convert search value to number for exact match
+                            search_value_converted = pd.to_numeric(self.search_value)
+                            mask = column_data == search_value_converted
+                        except (ValueError, TypeError):
+                            # If conversion fails, do exact string comparison
+                            mask = column_data.astype(str) == str(self.search_value)
+                    else:
+                        # For non-numeric data, do exact string matching
+                        mask = column_data.astype(str) == str(self.search_value)
+                    
+                    # Get matching rows from this chunk
+                    chunk_matches = chunk_data[mask].copy()
+                    chunk_match_count = len(chunk_matches)
+                    
+                    print(f"  Found {chunk_match_count:,} matches in chunk {chunks_processed}")
+                    
+                    if chunk_match_count > 0:
+                        # Append to results
+                        if self.filtered_df.empty:
+                            self.filtered_df = chunk_matches
+                        else:
+                            self.filtered_df = pd.concat([self.filtered_df, chunk_matches], ignore_index=True)
+                        
+                        total_matches += chunk_match_count
+                        print(f"  Total matches so far: {total_matches:,}")
+                    
+                    # Update progress with current match count
+                    self.status_label.config(
+                        text=f"Chunk {chunks_processed}/{total_chunks} - Found {total_matches:,} matches so far", 
+                        bootstyle="warning"
+                    )
+                    self.dialog.update()
+                    
+                except Exception as chunk_error:
+                    print(f"Error processing chunk {chunks_processed}: {str(chunk_error)}")
+                    continue
+            
+            # Final results
             self.preview_rows = len(self.filtered_df)
-            self.preview_columns = len(self.filtered_df.columns)
+            self.preview_columns = len(self.filtered_df.columns) if not self.filtered_df.empty else 0
+            
+            print(f"\n=== SEARCH COMPLETE ===")
+            print(f"Total chunks processed: {chunks_processed}")
+            print(f"Final match count: {self.preview_rows:,}")
+            print(f"Total columns: {self.preview_columns}")
 
             if self.preview_rows == 0:
                 self.preview_label.config(
@@ -517,6 +619,7 @@ class SpecificInstanceExportWindow:
                 self.sample_text.config(state="disabled")
                 self.export_button.config(state="disabled")
                 self.status_label.config(text="No matches found", bootstyle="warning")
+                print("Search completed - no matches found")
             else:
                 self.preview_label.config(
                     text=f"Found {self.preview_rows:,} rows × {self.preview_columns} columns",
@@ -533,14 +636,17 @@ class SpecificInstanceExportWindow:
                 self.sample_text.insert(END, "=" * 50 + "\n")
                 self.sample_text.insert(END, sample_data.to_string(max_cols=3, max_colwidth=15))
                 if self.preview_rows > sample_size:
-                    self.sample_text.insert(END, f"\n\n... and {self.preview_rows - sample_size} more rows")
+                    self.sample_text.insert(END, f"\n\n... and {self.preview_rows - sample_size:,} more rows")
                 self.sample_text.config(state="disabled")
                 
                 self.export_button.config(state="normal")
                 self.status_label.config(text=f"Ready to export {self.preview_rows:,} rows", bootstyle="success")
+                print(f"Search completed successfully - {self.preview_rows:,} matches found")
 
         except Exception as e:
-            self.preview_label.config(text=f"Error: {str(e)}", bootstyle="danger")
+            error_msg = f"Error: {str(e)}"
+            print(f"SEARCH ERROR: {error_msg}")
+            self.preview_label.config(text=error_msg, bootstyle="danger")
             self.sample_text.config(state="normal")
             self.sample_text.delete(1.0, END)
             self.sample_text.insert(END, f"Error occurred: {str(e)}")
@@ -550,6 +656,7 @@ class SpecificInstanceExportWindow:
         finally:
             # Re-enable search button
             self.search_button.config(state="normal", text="🔍 Search")
+            print("=== SEARCH SESSION COMPLETE ===\n")
 
     def _export_csv(self) -> None:
         """Export the filtered data to CSV"""
@@ -569,7 +676,7 @@ class SpecificInstanceExportWindow:
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
             title="Save Filtered CSV As",
-            initialvalue=f"{self.dataset_path.split('/')[-1]}_{self.selected_column}_{safe_value}.csv"
+            initialfile=f"{self.dataset_path.split('/')[-1]}_{self.selected_column}_{safe_value}.csv"
         )
         
         if not file_path:
@@ -579,14 +686,24 @@ class SpecificInstanceExportWindow:
             self.status_label.config(text="Exporting...", bootstyle="info")
             self.dialog.update()
             
+            print(f"\n=== EXPORTING FILTERED DATA ===")
+            print(f"Export file: {file_path}")
+            print(f"Rows to export: {self.preview_rows:,}")
+            print(f"Columns to export: {self.preview_columns}")
+            
             # Export the filtered dataframe directly
             self.filtered_df.to_csv(file_path, index=False)
+            
+            print(f"Export completed successfully!")
+            print(f"File saved to: {file_path}")
             
             Messagebox.show_info(
                 f"Successfully exported {self.preview_rows:,} rows to:\n{file_path}",
                 title="Export Complete"
             )
         except Exception as e:
-            Messagebox.show_error(f"Failed to export data: {str(e)}", title="Export Error")
+            error_msg = f"Failed to export data: {str(e)}"
+            print(f"EXPORT ERROR: {error_msg}")
+            Messagebox.show_error(error_msg, title="Export Error")
         finally:
             self.dialog.destroy()
