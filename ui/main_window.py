@@ -28,7 +28,7 @@ class MainWindow:
         self._center_window()
 
     def _setup_window(self) -> None:
-        self.root.title("h5_Cruncher - HDF5 Dataset Viewer")
+        self.root.title("  ")
         self.root.geometry("750x600")
         self.root.resizable(True, True)
         self.root.minsize(600, 400)
@@ -61,9 +61,6 @@ class MainWindow:
         except Exception as e:
             print("Logo failed to load:", e)
 
-        #ttkb.Label(title_frame, text="h5_cruncher2",
-        #           font=("Segoe UI", 20, "bold"), bootstyle="primary").grid(row=0, column=1, sticky=W)
-
         label_container = ttkb.Frame(title_frame)
         label_container.grid(row=0, column=1, sticky=W)
 
@@ -73,7 +70,7 @@ class MainWindow:
             text="h5 CRUNCHER",
             font=("Segoe UI", 25, "bold"),
             bootstyle="primary"
-        ).pack(anchor=W, pady=(0, 0))  # No padding between
+        ).pack(anchor=W, pady=(0, 0))
 
         # Subtitle Label
         ttkb.Label(
@@ -81,14 +78,14 @@ class MainWindow:
             text="Curate, Review, Unpack, Navigate, Convert, Handle, Explore, Retrieve",
             font=("Segoe UI", 10),
             bootstyle="Dark"
-        ).pack(anchor=W, pady=(0, 0))  # Still no padding
+        ).pack(anchor=W, pady=(0, 0))
 
         ttkb.Label(
             label_container,
             text="Atticus Nafziger 2025",
             font=("Segoe UI", 10),
             bootstyle="secondary"
-        ).pack(anchor=W, pady=(0, 0))  # Still no padding
+        ).pack(anchor=W, pady=(0, 0))
 
     def _center_window(self) -> None:
         self.root.update_idletasks()
@@ -106,10 +103,9 @@ class MainWindow:
 
             self.datasets = self.file_handler.get_datasets(file_path)
             self.current_file = file_path
-
-            self.dataset_list.update_datasets(self.datasets)
-
-            #Messagebox.show_info(f"Successfully loaded {len(self.datasets)} datasets", title="Success")
+            
+            # Pass the file path to dataset list so it can check exportability
+            self.dataset_list.update_datasets(self.datasets, file_path)
 
         except Exception as e:
             Messagebox.show_error(f"Failed to load file: {str(e)}", title="Error")
@@ -225,7 +221,8 @@ class MainWindow:
         self.root.quit()
         self.root.destroy()
 
+
 if __name__ == "__main__":
-    app = ttkb.Window(themename="d")
+    app = ttkb.Window(themename="darkly")
     main_window = MainWindow(app)
     main_window.run()

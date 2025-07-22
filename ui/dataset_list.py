@@ -6,15 +6,23 @@ Handles the scrollable list of datasets
 import tkinter as tk
 from tkinter import ttk
 from typing import List, Callable, Optional
+import ttkbootstrap as ttkb
+from ttkbootstrap.constants import *
+
 from core.h5_file_handler import H5FileHandler
+
+
 class DatasetList:
     """Handles the scrollable dataset list UI"""
     
-    def __init__(self, parent: ttk.Frame, callback: Callable[[str], None], current_file: Optional[str] = None):
+    def __init__(self, parent: ttk.Frame, callback: Callable[[str], None]):
         self.parent = parent
         self.callback = callback
-        self.current_file = current_file
         self.datasets: List[str] = []
+        self.current_file_path: Optional[str] = None
+        
+        # Add file handler for checking exportable datasets
+        self.file_handler = H5FileHandler()
         
         # UI elements
         self.list_frame: Optional[ttk.LabelFrame] = None
@@ -57,7 +65,7 @@ class DatasetList:
         search_frame.grid_columnconfigure(1, weight=1)
         
         # Search label
-        search_label = ttk.Label(search_frame, text="Filter:")
+        search_label = ttk.Label(search_frame, text="Search:")
         search_label.grid(row=0, column=0, padx=(0, 8))
         
         # Search entry
@@ -155,11 +163,49 @@ class DatasetList:
         self.canvas.bind('<Enter>', bind_to_mousewheel)
         self.canvas.bind('<Leave>', unbind_from_mousewheel)
     
-
+    def _is_exportable_dataframe(self, dataset_path: str) -> bool:
+        """
+        Check if a dataset is exportable as a DataFrame
+        
+        Args:
+            dataset_path: Path to the dataset
+            
+        Returns:
+            True if the dataset can be exported as a DataFrame, False otherwise
+        """
+        if not self.current_file_path:
+            return False
+            
+        try:
+            # Get dataset information
+            info = self.file_handler.get_dataset_info(self.current_file_path, dataset_path)
+            
+            # Check if it has identifiable columns
+            has_columns = 'columns' in info and info['columns'] and len(info['columns']) > 0
+            
+            # Check if it has a valid tabular shape
+            has_valid_shape = False
+            if 'shape' in info:
+                if isinstance(info['shape'], tuple) and len(info['shape']) >= 1:
+                    # Must have at least some rows
+                    if isinstance(info['shape'][0], int) and info['shape'][0] > 0:
+                        has_valid_shape = True
+                elif info['shape'] == 'Inferred':  # For pandas HDFStore groups
+                    has_valid_shape = True
+            
+            # Dataset is exportable if it has both columns and valid shape
+            is_exportable = has_columns and has_valid_shape
+                
+            return is_exportable
+            
+        except Exception as e:
+            print(f"Error checking exportability for {dataset_path}: {str(e)}")
+            return False
+    
     def _create_dataset_buttons(self, datasets: List[str]) -> None:
         """
-        Create buttons for the dataset list
-
+        Create buttons for the dataset list with styling based on exportability
+        
         Args:
             datasets: List of dataset paths to create buttons for
         """
@@ -167,41 +213,53 @@ class DatasetList:
         for button in self.dataset_buttons:
             button.destroy()
         self.dataset_buttons.clear()
-
-        file_handler = H5FileHandler()  # Create an instance to check exportability
-
+        
+        # Create new buttons
+        exportable_count = 0
         for i, dataset_path in enumerate(datasets):
-            # Check if dataset is exportable (has columns)
-            try:
-                info = file_handler.get_dataset_info(self.current_file, dataset_path)
-                #print(f"INFO for {dataset_path}: {info}")
-                is_exportable = isinstance(info.get("columns"), list) and len(info["columns"]) > 0
-            except Exception as e:
-                #print(f"Error for {dataset_path}: {e}")
-                is_exportable = False
-
-            # Use secondary style if exportable, otherwise default
-            style = {"bootstyle": "success"} if is_exportable else {}
-            #print(is_exportable)
-            btn = ttk.Button(
-                self.scrollable_frame,
-                text=self._format_dataset_name(dataset_path),
-                command=lambda path=dataset_path: self.callback(path),
-                width=70,
-                **style
-            )
+            # Check if dataset is exportable
+            is_exportable = self._is_exportable_dataframe(dataset_path)
+            if is_exportable:
+                exportable_count += 1
+            
+            # Choose button style based on exportability
+            if is_exportable:
+                # Use ttkbootstrap button with success style for exportable datasets
+                btn = ttkb.Button(
+                    self.scrollable_frame,
+                    text=f"{self._format_dataset_name(dataset_path)}",
+                    command=lambda path=dataset_path: self.callback(path),
+                    bootstyle="success",
+                    width=70
+                )
+            else:
+                # Use regular ttk button for non-exportable datasets
+                btn = ttk.Button(
+                    self.scrollable_frame,
+                    text=f"{self._format_dataset_name(dataset_path)}",
+                    command=lambda path=dataset_path: self.callback(path),
+                    width=70
+                )
+            
             btn.grid(row=i, column=0, sticky=(tk.W, tk.E), padx=5, pady=3)
-
+            
+            # Add hover effect
             self._add_hover_effect(btn)
+            
+            # Store button reference
             self.dataset_buttons.append(btn)
-
-        # Add count label
+        
+        # Add summary label
         if datasets:
-            count_label = ttk.Label(self.scrollable_frame,
-                                  text=f"Total: {len(datasets)} dataset{'s' if len(datasets) != 1 else ''}",
+            summary_text = f"Total: {len(datasets)} dataset{'s' if len(datasets) != 1 else ''}"
+            if exportable_count > 0:
+                summary_text += f" ({exportable_count} exportable)"
+                
+            count_label = ttk.Label(self.scrollable_frame, 
+                                  text=summary_text,
                                   font=("TkDefaultFont", 8), foreground="gray")
             count_label.grid(row=len(datasets), column=0, pady=(15, 5))
-            self.dataset_buttons.append(count_label)
+            self.dataset_buttons.append(count_label)  # Store for cleanup
     
     def _format_dataset_name(self, dataset_path: str) -> str:
         """
@@ -221,7 +279,7 @@ class DatasetList:
         
         return dataset_path
     
-    def _add_hover_effect(self, button: ttk.Button) -> None:
+    def _add_hover_effect(self, button) -> None:
         """Add hover effect to button"""
         def on_enter(e):
             button.configure(cursor="hand2")
@@ -253,15 +311,17 @@ class DatasetList:
         """Clear the search field"""
         self.search_var.set("")
     
-    def update_datasets(self, datasets: List[str]) -> None:
+    def update_datasets(self, datasets: List[str], file_path: str = None) -> None:
         """
         Update the dataset list
         
         Args:
             datasets: New list of datasets
+            file_path: Path to the current file (for exportability checking)
         """
         self.datasets = datasets
         self.filtered_datasets = datasets.copy()
+        self.current_file_path = file_path  # Store file path for exportability checking
         
         # Hide no file message
         self._hide_no_file_message()
@@ -274,13 +334,14 @@ class DatasetList:
         # Create scrollable list
         self._create_scrollable_list()
         
-        # Create dataset buttons
+        # Create dataset buttons with exportability styling
         self._create_dataset_buttons(datasets)
     
     def clear_datasets(self) -> None:
         """Clear all datasets and show no file message"""
         self.datasets.clear()
         self.filtered_datasets.clear()
+        self.current_file_path = None
         
         # Hide search bar
         if hasattr(self, 'search_frame'):
