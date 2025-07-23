@@ -343,40 +343,14 @@ class SpecificInstanceExportWindow:
             self.column_var.trace_add("write", self._on_column_selected)
 
         for col in current_page_columns:
-            # Get up to 3 example values for this column (if possible)
-            example_values = []
-            try:
-                # Try to read a small sample of the column from the dataset
-                sample_df = self.file_handler.read_dataset(
-                    self.h5_file_path, self.dataset_path, slice_rows=(0, 10)
-                )
-                if isinstance(sample_df, pd.DataFrame) and col in sample_df.columns:
-                    col_sample = sample_df[col].dropna().unique()[:3]
-                    example_values = [str(v) for v in col_sample]
-            except Exception:
-                pass
-
-            rb_frame = ttkb.Frame(scrollable_frame)
-            rb_frame.pack(anchor=W, fill=X, pady=3, padx=5)
-
             rb = ttkb.Radiobutton(
-                rb_frame, 
+                scrollable_frame, 
                 text=col, 
                 variable=self.column_var, 
                 value=col,
                 bootstyle="primary"
             )
-            rb.pack(side=LEFT)
-
-            if example_values:
-                # Show as: (e.g. val1, val2, val3)
-                example_text = f"(e.g. {', g'.join(example_values)})"
-                example_label = ttkb.Label(
-                    rb_frame, 
-                    text=example_text, 
-                    bootstyle="secondary"
-                )
-                example_label.pack(side=LEFT, padx=(8, 0))
+            rb.pack(anchor=W, pady=3, padx=5)
 
         # Bind mouse wheel scrolling (borrowed from export window)
         def _on_mousewheel(event):
