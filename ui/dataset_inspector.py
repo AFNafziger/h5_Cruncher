@@ -414,22 +414,30 @@ class DatasetInspector:
         # Main column frame
         col_frame = ttkb.Frame(self.scrollable_frame, padding=5)
         col_frame.grid(row=row, column=0, sticky=(W, E), padx=2, pady=0)
-        col_frame.grid_columnconfigure(0, weight=1)
+        col_frame.grid_columnconfigure(0, weight=0)
+        col_frame.grid_columnconfigure(1, weight=1)
 
         # Get preview data
         preview_data = self.column_data_cache.get(column_name, ["N/A", "N/A", "N/A"])
         formatted_values = [self._format_preview_value(v) for v in preview_data]
-        preview_text = ", ".join(f"{val}" for i, val in enumerate(formatted_values))
+        preview_text = ", ".join(formatted_values)
 
-        # First row: column name + preview values
-        preview_line = f"{column_index}. {column_name}: {preview_text}"
-        name_and_preview_label = ttkb.Label(
+        # First row: column name (bold/primary) + preview values (not bold/secondary)
+        name_label = ttkb.Label(
             col_frame,
-            text=preview_line,
+            text=f"{column_index}. {column_name}:",
             font=("Segoe UI", 10, "bold"),
             bootstyle="primary"
         )
-        name_and_preview_label.grid(row=0, column=0, sticky=W)
+        name_label.grid(row=0, column=0, sticky=W)
+
+        preview_label = ttkb.Label(
+            col_frame,
+            text=f" {preview_text}",
+            font=("Segoe UI", 8),  # Not bold
+            bootstyle="success"
+        )
+        preview_label.grid(row=0, column=1, sticky=W)
 
         # Second row: data type
         try:
@@ -451,7 +459,7 @@ class DatasetInspector:
             font=("Segoe UI", 8, "italic"),
             bootstyle="secondary"
         )
-        type_label.grid(row=1, column=0, sticky=W, pady=(2, 0))
+        type_label.grid(row=1, column=0, columnspan=2, sticky=W, pady=(2, 0))
 
     
     def _format_preview_value(self, value: Any) -> str:
