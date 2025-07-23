@@ -54,12 +54,21 @@ class MainWindow:
         title_frame.grid(row=0, column=0, sticky=(W, E), pady=(0, 25))
 
         try:
-            img = Image.open("assets/logo.png").resize((96, 96))
+            img = Image.open("ui/logo.png").resize((96, 96))
             self.logo_img = ImageTk.PhotoImage(img)
             img_label = ttkb.Label(title_frame, image=self.logo_img)
             img_label.grid(row=0, column=0, rowspan=2, padx=(0, 10))
         except Exception as e:
-            print("Logo failed to load:", e)
+            pass
+
+        try:
+            img = Image.open("h5_Cruncher/ui/logo.png").resize((96, 96))
+            self.logo_img = ImageTk.PhotoImage(img)
+            img_label = ttkb.Label(title_frame, image=self.logo_img)
+            img_label.grid(row=0, column=0, rowspan=2, padx=(0, 10))
+        except Exception as e:
+            pass
+
 
         label_container = ttkb.Frame(title_frame)
         label_container.grid(row=0, column=1, sticky=W)

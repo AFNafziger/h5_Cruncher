@@ -211,7 +211,7 @@ class DatasetInspector:
         search_frame.grid_columnconfigure(1, weight=1)
         
         # Search label
-        search_label = ttkb.Label(search_frame, text="🔍 Search columns:", 
+        search_label = ttkb.Label(search_frame, text="Search columns:", 
                                 font=("Segoe UI", 11))
         search_label.grid(row=0, column=0, padx=(0, 10), sticky=W)
         
